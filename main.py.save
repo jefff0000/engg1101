@@ -1,0 +1,289 @@
+import time
+import signal
+
+import cv2
+from ultralytics import YOLO
+
+import board
+import busio
+from adafruit_vl53l0x import VL53L0X
+
+import sounddevice as sd
+import soundfile as sf
+
+import RPi.GPIO as GPIO
+
+# =========================
+# CONFIG
+# =========================
+MODEL_PATH = "best.pt"
+VOICE_DIR = "voices"
+
+LABELS = {0: "paper", 1: "plastic", 2: "can"}
+
+DISTANCE_THRESHOLD_MM = 70
+CONFIDENCE_THRESHOLD = 0.5
+YOLO_IMGSZ = 320
+RESIZE_FOR_YOLO = (320, 240)
+STABLE_FRAMES_REQUIRED = 10
+
+GPIO_MODE = GPIO.BCM
+SERVO1_PIN = 17
+SERVO2_PIN = 27
+PWM_HZ = 50
+
+SERVO1_DIR = 1
+SERVO2_DIR = -1
+
+DUTY_MIN = 4.0
+DUTY_MAX = 11.0
+
+REST_ANGLE_1 = 0
+REST_ANGLE_2 = 0
+EDGE_ANGLE = 80
+
+RAMP_TIME_SEC = 2.0
+RAMP_STEP_SEC = 0.02
+SERVO_EXTRA_IDLE_SEC = 0.5
+
+COOLDOWN_BEFORE_RESET_SEC = 0.3
+SLEEP_AFTER_RESET_SEC = 1.0
+
+AUDIO_DEVICE = None
+AUDIO_GAIN = 2.0
+
+running = True
+
+
+def handle_sigint(sig, frame):
+    global running
+    running = False
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+# =========================
+# AUDIO
+# =========================
+class AudioPlayer:
+    def __init__(self, voice_dir, device=None, gain=1.0):
+        self.voice_dir = voice_dir
+        self.device = device
+        self.gain = float(gain)
+        self.cache = {}
+
+    def _load(self, filename):
+        if filename in self.cache:
+            return
+        path = f"{self.voice_dir}/{filename}"
+        data, sr = sf.read(path, dtype="float32", always_2d=True)
+        if self.gain != 1.0:
+            data = (data * self.gain).clip(-1.0, 1.0)
+        self.cache[filename] = (data, sr)
+
+    def play(self, filename, block=False):
+        try:
+            self._load(filename)
+            data, sr = self.cache[filename]
+            sd.play(data, samplerate=sr, device=self.device, blocking=block)
+            if block:
+                sd.wait()
+        except Exception as e:
+            log(f"Audio error ({filename}): {e}")
+
+
+# =========================
+# SERVO
+# =========================
+def clamp(x, lo, hi):
+    return lo if x < lo else hi if x > hi else x
+
+
+def angle_to_duty(angle_deg: float) -> float:
+    a = clamp(float(angle_deg), -90.0, 90.0)
+    t = (a + 90.0) / 180.0
+    return DUTY_MIN + t * (DUTY_MAX - DUTY_MIN)
+
+
+class MG90S:
+    def __init__(self, bcm_pin: int, direction: int = 1, pwm_hz: int = 50, initial_angle: float = 0.0):
+        self.pin = int(bcm_pin)
+        self.dir = 1 if direction >= 0 else -1
+        GPIO.setup(self.pin, GPIO.OUT)
+        self.pwm = GPIO.PWM(self.pin, int(pwm_hz))
+        self.pwm.start(0)
+        self.current_angle = float(initial_angle)
+
+    def _apply_angle(self, angle_deg: float):
+        cmd_angle = float(angle_deg) * self.dir
+        duty = angle_to_duty(cmd_angle)
+        GPIO.output(self.pin, True)
+        self.pwm.ChangeDutyCycle(duty)
+        self.current_angle = float(angle_deg)
+
+    def set_angle_ramp(self, target_angle: float, ramp_time_sec: float = RAMP_TIME_SEC, step_sec: float = RAMP_STEP_SEC):
+        target = float(target_angle)
+        start = float(self.current_angle)
+        steps = max(1, int(ramp_time_sec / step_sec))
+        for i in range(1, steps + 1):
+            a = start + (target - start) * (i / steps)
+            self._apply_angle(a)
+            time.sleep(step_sec)
+        self.current_angle = target
+
+    def stop(self):
+        try:
+            self.pwm.ChangeDutyCycle(0)
+        except Exception:
+            pass
+        try:
+            self.pwm.stop()
+        except Exception:
+            pass
+
+
+def idle_gap():
+    time.sleep(SERVO_EXTRA_IDLE_SEC)
+
+
+def move_servo_ramped(servo: MG90S, angle: float):
+    servo.set_angle_ramp(angle, ramp_time_sec=RAMP_TIME_SEC, step_sec=RAMP_STEP_SEC)
+    idle_gap()
+
+
+def move_to_target_servo1_first(servo1: MG90S, servo2: MG90S, a1: float, a2: float):
+    move_servo_ramped(servo1, a1)
+    move_servo_ramped(servo2, a2)
+
+
+def move_to_rest_servo2_first(servo1: MG90S, servo2: MG90S):
+    move_servo_ramped(servo2, REST_ANGLE_2)
+    move_servo_ramped(servo1, REST_ANGLE_1)
+
+
+def reset_to_rest_with_waits(servo1: MG90S, servo2: MG90S):
+    time.sleep(COOLDOWN_BEFORE_RESET_SEC)
+    move_to_rest_servo2_first(servo1, servo2)
+    time.sleep(SLEEP_AFTER_RESET_SEC)
+
+
+# =========================
+# DETECTION
+# =========================
+def signature_class_ids(results):
+    ids = []
+    for r in results:
+        for b in r.boxes:
+            ids.append(int(b.cls))
+    ids.sort()
+    return ids
+
+
+def signature_to_labels(sig):
+    return [LABELS.get(i, f"class{i}") for i in sig]
+
+
+def decide_angles_from_label(label: str):
+    if label == "plastic":
+        return (0, EDGE_ANGLE)
+    if label == "can":
+        return (-EDGE_ANGLE, EDGE_ANGLE)
+    if label == "paper":
+        return (EDGE_ANGLE, -EDGE_ANGLE)
+    return None
+
+
+# =========================
+# INIT
+# =========================
+def init_distance():
+    try:
+        i2c = busio.I2C(board.SCL, board.SDA)
+        sensor = VL53L0X(i2c)
+        log(f"VL53L0X OK. Initial distance: {sensor.distance} mm")
+        return sensor
+    except Exception as e:
+        log(f"VL53L0X init failed: {e}")
+        return None
+
+
+def open_camera():
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        log("Camera not detected.")
+        return None
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    log("Camera opened")
+    return cap
+
+
+def close_camera(cap):
+    try:
+        cap.release()
+    except Exception:
+        pass
+    log("Camera closed")
+
+
+def init_model():
+    try:
+        model = YOLO(MODEL_PATH)
+        log("YOLO model loaded")
+        return model
+    except Exception as e:
+        log(f"YOLO load failed: {e}")
+        return None
+
+
+def init_servos():
+    GPIO.setmode(GPIO_MODE)
+    GPIO.setwarnings(False)
+    s1 = MG90S(SERVO1_PIN, direction=SERVO1_DIR, pwm_hz=PWM_HZ, initial_angle=0.0)
+    s2 = MG90S(SERVO2_PIN, direction=SERVO2_DIR, pwm_hz=PWM_HZ, initial_angle=0.0)
+    log(f"Servos ready: servo1=BCM{SERVO1_PIN} dir={SERVO1_DIR}, servo2=BCM{SERVO2_PIN} dir={SERVO2_DIR}")
+    return s1, s2
+
+
+# =========================
+# MAIN
+# =========================
+def main():
+    global running
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    log("Initializing...")
+    sensor = init_distance()
+    model = init_model()
+    servo1, servo2 = init_servos()
+    audio = AudioPlayer(VOICE_DIR, device=AUDIO_DEVICE, gain=AUDIO_GAIN)
+
+    if not (sensor and model and servo1 and servo2):
+        log("Init failed. Exiting.")
+        return
+
+    cap = None
+    mode = "sleep"
+    last_sig = None
+    stable_frames = 0
+
+    log("Entering sleep mode")
+
+    try:
+        while running:
+            if mode == "sleep":
+                if cap is not None:
+                    close_camera(cap)
+                    cap = None
+                try:
+                    dist = sensor.distance
+                except Exception as e:
+                    log(f"I2C distance read error: {e}")
+                    time.sleep(0.2)
+                    continue
+                if dist <= DISTANCE_THRESHOLD_MM:
+                    cap = open_camera()
+                    if cap is None:
+                        time.sleep(

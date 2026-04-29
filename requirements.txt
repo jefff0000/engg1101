@@ -1,0 +1,7 @@
+picamera2
+opencv-python
+ultralytics
+pygame
+pigpio
+adafruit-circuitpython-vl53l0x
+adafruit-blinka

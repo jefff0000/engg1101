@@ -1,0 +1,48 @@
+2026-04-21 06:34:03,462 [INFO] Initializing VL53L0X via Adafruit...
+2026-04-21 06:34:03,534 [INFO] Testing VL53L0X...
+2026-04-21 06:34:03,572 [INFO] VL53L0X OK, initial distance: 584 mm
+2026-04-21 06:34:03,572 [INFO] Loading YOLO model...
+2026-04-21 06:34:03,655 [INFO] YOLO model loaded successfully.
+2026-04-21 06:34:03,656 [INFO] Testing USB camera...
+2026-04-21 06:34:04,126 [INFO] Camera OK, frame captured.
+2026-04-21 06:34:04,127 [INFO] Initialization and self-tests complete.
+2026-04-21 06:34:04,127 [INFO] Entering main loop...
+2026-04-21 06:34:08,446 [INFO] Entering READY mode.
+2026-04-21 06:34:08,446 [INFO] Capturing frame for YOLO inference...
+2026-04-21 06:34:09,752 [INFO] Detections: ['1']
+2026-04-21 06:34:09,752 [INFO] Finished YOLO inference, returning to distance check.
+2026-04-21 06:34:19,781 [INFO] Capturing frame for YOLO inference...
+2026-04-21 06:34:20,580 [INFO] Detections: ['1']
+2026-04-21 06:34:20,580 [INFO] Confirmed detection after 2s: ['1']
+2026-04-21 06:34:20,580 [INFO] Object type 1 detected.
+2026-04-21 06:34:21,580 [WARNING] Audio file class1.wav not found. Pretending to play it (no sound).
+2026-04-21 06:34:21,580 [INFO] Finished YOLO inference, returning to distance check.
+2026-04-21 06:34:21,718 [INFO] Entering SLEEP mode.
+2026-04-21 06:34:22,718 [WARNING] Audio file sleep.wav not found. Pretending to play it (no sound).
+2026-04-21 06:34:28,212 [INFO] Entering READY mode.
+2026-04-21 06:34:28,213 [INFO] Capturing frame for YOLO inference...
+2026-04-21 06:34:29,010 [INFO] Detections: ['1']
+2026-04-21 06:34:29,010 [INFO] Finished YOLO inference, returning to distance check.
+2026-04-21 06:34:30,932 [INFO] Capturing frame for YOLO inference...
+2026-04-21 06:34:31,708 [INFO] Detections: ['1']
+2026-04-21 06:34:31,708 [INFO] Confirmed detection after 2s: ['1']
+2026-04-21 06:34:31,708 [INFO] Object type 1 detected.
+2026-04-21 06:34:32,708 [WARNING] Audio file class1.wav not found. Pretending to play it (no sound).
+2026-04-21 06:34:32,708 [INFO] Finished YOLO inference, returning to distance check.
+2026-04-21 06:34:32,846 [INFO] Capturing frame for YOLO inference...
+2026-04-21 06:34:33,635 [INFO] Detections: ['1']
+2026-04-21 06:34:33,635 [INFO] Finished YOLO inference, returning to distance check.
+2026-04-21 06:34:33,772 [INFO] Entering SLEEP mode.
+2026-04-21 06:34:34,772 [WARNING] Audio file sleep.wav not found. Pretending to play it (no sound).
+2026-04-21 06:34:34,910 [INFO] Entering READY mode.
+2026-04-21 06:34:34,910 [INFO] Capturing frame for YOLO inference...
+2026-04-21 06:34:35,685 [INFO] Detections: ['1']
+2026-04-21 06:34:35,685 [INFO] Confirmed detection after 2s: ['1']
+2026-04-21 06:34:35,685 [INFO] Object type 1 detected.
+2026-04-21 06:34:36,685 [WARNING] Audio file class1.wav not found. Pretending to play it (no sound).
+2026-04-21 06:34:36,685 [INFO] Finished YOLO inference, returning to distance check.
+2026-04-21 06:34:36,823 [INFO] Capturing frame for YOLO inference...
+2026-04-21 06:34:37,599 [INFO] Detections: ['1']
+2026-04-21 06:34:37,599 [INFO] Finished YOLO inference, returning to distance check.
+2026-04-21 06:34:37,736 [INFO] Entering SLEEP mode.
+2026-04-21 06:34:38,737 [WARNING] Audio file sleep.wav not found. Pretending to play it (no sound).
